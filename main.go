@@ -88,6 +88,7 @@ func getIpoNodes(ctx context.Context) ([]*cdp.Node, []*cdp.Node, error) {
 	); err != nil {
 		return nil, nil, fmt.Errorf("could not get navigate to IPO nodes: %s", err)
 	}
+	// 防止无参加/申请时，程序挂起导致超时
 	tctx, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 	if err := chromedp.Run(tctx, chromedp.Nodes(`//div/nobr/a[contains(text(), "参加")]`, &joinNodes, chromedp.BySearch)); err != nil {
