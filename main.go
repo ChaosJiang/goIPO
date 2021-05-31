@@ -4,44 +4,36 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"time"
 
+	"github.com/ChaosJiang/goIPO/conf"
 	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/chromedp"
-	"github.com/joho/godotenv"
 )
-
-func getEnvVariable(key string) string {
-	// Load the .env file in the current directory
-	err := godotenv.Load(".env")
-	if err !=nil {
-		log.Fatalf("Error loading .env file")
-	}
-	return os.Getenv(key)
-}
 
 func main() {
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.DisableGPU,
 		chromedp.Flag("headless", false),
 	)
-	ctx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
+	allocCtx, cancel := chromedp.NewExecAllocator(context.Background(), opts...)
 	defer cancel()
 
-	ctx, cancel = chromedp.NewContext(ctx)
+	// create chrome instance
+	taskCtx, cancel := chromedp.NewContext(allocCtx, chromedp.WithLogf(log.Printf))
 	defer cancel()
 
-	// // create headless chrome instance
+	// create headless chrome instance
 	// ctx, cancel := chromedp.NewContext(context.Background())
 	// defer cancel()
 
 	// create a timeout
-	ctx, cancel = context.WithTimeout(ctx, 60*time.Second)
+	ctx, cancel := context.WithTimeout(taskCtx, 30*time.Second)
 	// 希望浏览器关闭，使用cancel()方法即可
 	defer cancel()
 
 	// login
-	err :=login(ctx)
+	err := login(ctx)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -49,22 +41,25 @@ func main() {
 	// get ipo participation links nodes
 	joinNodes, applyNodes, err := getIpoNodes(ctx)
 	if err != nil {
-		log.Fatal(err)
+		log.Println(err)
 	}
-	// do IPO
+	// // do IPO
 	err = doJoin(ctx, joinNodes)
 	if err != nil {
-		log.Fatal(err)
+		log.Println(err)
 	}
 	err = doApply(ctx, applyNodes)
+	if err != nil {
+		log.Println(err)
+	}
 }
 
 // Login in tasks
 func login(ctx context.Context) error {
-	username := getEnvVariable("USERNAME")
-	password := getEnvVariable("PASSWD")
-	loginUrl := getEnvVariable("LOGIN_URL")
-	// login 
+	loginUrl := conf.GetEnvVariable("LOGIN_URL")
+	username := conf.GetEnvVariable("USERNAME")
+	password := conf.GetEnvVariable("PASSWD")
+	// login
 	if err := chromedp.Run(
 		ctx,
 		chromedp.Navigate(loginUrl),
@@ -76,7 +71,7 @@ func login(ctx context.Context) error {
 		// click login button
 		chromedp.Click(`button.s3-form-login__btn`, chromedp.ByQuery),
 	); err != nil {
-		return fmt.Errorf("could not login: %s", err)
+		return fmt.Errorf("login failed: %s", err)
 	}
 	return nil
 }
@@ -84,25 +79,29 @@ func login(ctx context.Context) error {
 func getIpoNodes(ctx context.Context) ([]*cdp.Node, []*cdp.Node, error) {
 	var joinNodes []*cdp.Node
 	var applyNodes []*cdp.Node
-	var ipoUrl string
 	// navigate to ipo page
 	if err := chromedp.Run(
 		ctx,
 		chromedp.WaitVisible(`#gmenu_domestic_stock`, chromedp.ByID),
 		chromedp.Click(`#gmenu_domestic_stock`, chromedp.ByID),
 		chromedp.Click(`ul.pcm-nav-03__list > li:nth-child(3)`, chromedp.ByQuery),
-		chromedp.Nodes(`//div/nobr/a[contains(text(), "参加")]`, &joinNodes, chromedp.BySearch),
-		chromedp.Nodes(`//div/a[contains(text(), "申込")]`, &applyNodes, chromedp.BySearch),
-		chromedp.Location(&ipoUrl),
 	); err != nil {
-		return nil, nil, fmt.Errorf("could not get IPO nodes: %s", err)
+		return nil, nil, fmt.Errorf("could not get navigate to IPO nodes: %s", err)
 	}
-	return joinNodes,applyNodes, nil;
+	tctx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	if err := chromedp.Run(tctx, chromedp.Nodes(`//div/nobr/a[contains(text(), "参加")]`, &joinNodes, chromedp.BySearch)); err != nil {
+		log.Printf("cannot get join nodes %v", err)
+	}
+	if err := chromedp.Run(tctx, chromedp.Nodes(`//div/a[contains(text(), "申込")]`, &applyNodes, chromedp.BySearch)); err != nil {
+		log.Printf("cannot get apply nodes %v", err)
+	}
+	return joinNodes, applyNodes, nil
 }
 
 func doJoin(ctx context.Context, nodes []*cdp.Node) error {
 	// force max timeout of 15 seconds for retrieving and processing the data
-	shortPassword := getEnvVariable("SHORT_PASSWD")
+	shortPassword := conf.GetEnvVariable("SHORT_PASSWD")
 	// iterate nodes
 	for _, node := range nodes {
 		if err := chromedp.Run(
@@ -132,7 +131,6 @@ func doJoin(ctx context.Context, nodes []*cdp.Node) error {
 	}
 	return nil
 }
-
 
 func doApply(ctx context.Context, nodes []*cdp.Node) error {
 	return nil
